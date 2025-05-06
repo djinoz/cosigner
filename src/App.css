@@ -1,0 +1,126 @@
+/* General Styles */
+body {
+  background-color: #f8f9fa;
+}
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.content {
+  flex: 1;
+  padding: 20px 0;
+}
+
+/* Auth Screen */
+.divider-text {
+  position: relative;
+  text-align: center;
+  margin: 15px 0;
+}
+
+.divider-text:before,
+.divider-text:after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 45%;
+  height: 1px;
+  background-color: #dee2e6;
+}
+
+.divider-text:before {
+  left: 0;
+}
+
+.divider-text:after {
+  right: 0;
+}
+
+/* Contract List */
+.contract-card {
+  transition: transform 0.2s;
+}
+
+.contract-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Contract Detail */
+.markdown-content {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  line-height: 1.6;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  margin-top: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.markdown-content p {
+  margin-bottom: 1rem;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  margin-bottom: 1rem;
+  padding-left: 2rem;
+}
+
+.markdown-content blockquote {
+  border-left: 4px solid #dee2e6;
+  padding-left: 1rem;
+  margin-left: 0;
+  color: #6c757d;
+}
+
+.markdown-content pre,
+.markdown-content code {
+  background-color: #f8f9fa;
+  border-radius: 3px;
+  padding: 0.2rem 0.4rem;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.markdown-content pre {
+  padding: 1rem;
+  overflow-x: auto;
+}
+
+.markdown-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1rem;
+}
+
+.markdown-content table th,
+.markdown-content table td {
+  border: 1px solid #dee2e6;
+  padding: 0.5rem;
+}
+
+.markdown-content table th {
+  background-color: #f8f9fa;
+}
+
+/* Contract Upload */
+.markdown-preview {
+  min-height: 300px;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .content {
+    padding: 10px;
+  }
+}
