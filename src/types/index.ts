@@ -26,6 +26,17 @@ export interface NostrEvent {
   sig?: string;             // Event signature (computed)
 }
 
+export interface UserProfile {
+  pubkey: string;           // Public key of the user
+  name?: string;            // Display name
+  displayName?: string;     // Display name (alternative field)
+  username?: string;        // Username 
+  nip05?: string;           // NIP-05 identifier (user@domain)
+  picture?: string;         // Profile picture URL
+  about?: string;           // Bio/about information
+  created_at?: number;      // Profile creation/update timestamp
+}
+
 export interface ContractState {
   latestEvent: NostrEvent;
   allEvents: NostrEvent[];

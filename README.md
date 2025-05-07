@@ -97,8 +97,8 @@ If multiple signatories sign simultaneously, conflicts may occur. In this case:
 
 ## Prototype Features
 
-- **Simulation Mode**: The application can operate in a simulation mode where it generates sample contracts and simulates signing operations, allowing you to test the full workflow without a real Nostr relay
-- **Fallback Mechanisms**: If a contract is not found in the relay, the application will generate a simulated contract for demonstration purposes
+~~ - Simulation Mode: The application can operate in a simulation mode where it generates sample contracts and simulates signing operations, allowing you to test the full workflow without a real Nostr relay ~~
+~~ - Fallback Mechanisms: If a contract is not found in the relay, the application will generate a simulated contract for demonstration purposes~~
 - **Authentication Flexibility**: Supports both NIP-07 browser extensions and direct nsec key input, with fallback mechanisms to ensure signing always works
 - **Error Handling**: Comprehensive error handling throughout the application to provide a smooth user experience
 

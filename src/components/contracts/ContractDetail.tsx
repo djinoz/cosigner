@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Container, Row, Col, Card, Button, Badge, Alert, Spinner, Table } from 'react-bootstrap';
+import { Container, Row, Col, Card, Button, Badge, Alert, Spinner, Table, OverlayTrigger, Tooltip, Dropdown } from 'react-bootstrap';
 import authManager from '../../services/AuthManager';
 import contractManager from '../../services/ContractManager';
 import nostrClient from '../../services/NostrClient';
 import markdownUtils from '../../utils/MarkdownUtils';
 import MarkdownPreview from '../common/MarkdownPreview';
 import NsecReEntryModal from '../auth/NsecReEntryModal';
-import { ContractEvent, ContractState, NostrEvent } from '../../types';
+import { ContractEvent, ContractState, NostrEvent, UserProfile } from '../../types';
 
 const ContractDetail: React.FC = () => {
   const { contractId } = useParams<{ contractId: string }>();
@@ -18,6 +18,8 @@ const ContractDetail: React.FC = () => {
   const [signingInProgress, setSigningInProgress] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
   const [showNsecModal, setShowNsecModal] = useState(false);
+  const [userProfiles, setUserProfiles] = useState<Map<string, UserProfile>>(new Map());
+  const [selectedVersionIndex, setSelectedVersionIndex] = useState<number>(0);
 
   useEffect(() => {
     if (!contractId) {
@@ -50,7 +52,46 @@ const ContractDetail: React.FC = () => {
       try {
         const state = await contractManager.getContractState(contractId);
         setContractState(state);
+        setSelectedVersionIndex(0); // Reset to latest version when refreshing
         setError(null);
+        
+        // Collect all pubkeys from this contract (creator, signers)
+        const pubkeysToFetch = new Set<string>();
+        
+        // Add the creator/uploader
+        if (state.latestEvent.pubkey) {
+          pubkeysToFetch.add(state.latestEvent.pubkey);
+        }
+        
+        // Add all signers from all versions
+        for (const event of state.allEvents) {
+          try {
+            const content = JSON.parse(event.content) as ContractEvent;
+            for (const signature of content.signatures) {
+              if (signature.pubkey) {
+                pubkeysToFetch.add(signature.pubkey);
+              }
+            }
+          } catch (error) {
+            console.warn('Error parsing event content:', error);
+          }
+        }
+        
+        // Add all signatories (p tags)
+        for (const event of state.allEvents) {
+          for (const tag of event.tags) {
+            if (tag[0] === 'p' && tag[1]) {
+              pubkeysToFetch.add(tag[1]);
+            }
+          }
+        }
+        
+        // Fetch all user profiles in one batch
+        if (pubkeysToFetch.size > 0) {
+          const profiles = await nostrClient.fetchUserProfiles(Array.from(pubkeysToFetch));
+          setUserProfiles(profiles);
+        }
+
       } catch (err) {
         if ((err as Error).message === 'Contract not found') {
           console.log('Contract not found, creating simulated contract for prototype');
@@ -86,6 +127,17 @@ const ContractDetail: React.FC = () => {
             needsUserSignature: true
           });
           setError(null);
+          
+          // Add simulated profile
+          const profiles = new Map<string, UserProfile>();
+          const pubkey = authManager.getPubkey() || 'simulated_pubkey';
+          profiles.set(pubkey, {
+            pubkey,
+            name: 'Test User',
+            displayName: 'Test User',
+            nip05: 'user@example.com'
+          });
+          setUserProfiles(profiles);
         } else {
           setError((err as Error).message);
         }
@@ -130,6 +182,20 @@ const ContractDetail: React.FC = () => {
   const handleNsecSuccess = () => {
     // Re-attempt signing after successful nsec re-entry
     handleSignContract();
+  };
+  
+  // Helper function to get the display name for a pubkey
+  const getDisplayName = (pubkey: string): string => {
+    const profile = userProfiles.get(pubkey);
+    if (!profile) return pubkey.substring(0, 8) + '...';
+    
+    // Prefer NIP-05, then username, then displayName
+    if (profile.nip05) return profile.nip05;
+    if (profile.name) return profile.name;
+    if (profile.displayName) return profile.displayName;
+    
+    // Default to shortened pubkey
+    return pubkey.substring(0, 8) + '...';
   };
 
   const handleResolveForks = async () => {
@@ -180,7 +246,12 @@ const ContractDetail: React.FC = () => {
     );
   }
 
-  const content = JSON.parse(contractState.latestEvent.content) as ContractEvent;
+  // Get the selected version (default to latest if index is out of bounds)
+  const selectedEvent = contractState.allEvents.length > selectedVersionIndex 
+    ? contractState.allEvents[selectedVersionIndex] 
+    : contractState.latestEvent;
+  
+  const content = JSON.parse(selectedEvent.content) as ContractEvent;
   const title = content.title;
   const markdownContent = content.content;
   const signatures = content.signatures;
@@ -188,6 +259,9 @@ const ContractDetail: React.FC = () => {
   const isComplete = contractState.isComplete;
   const needsUserSignature = contractState.needsUserSignature;
   const hasForks = contractState.hasForks;
+  
+  // The creator/uploader of the contract
+  const originatorPubkey = selectedEvent.pubkey;
 
   return (
     <Container className="mt-4">
@@ -265,8 +339,32 @@ const ContractDetail: React.FC = () => {
         </Col>
         <Col md={4}>
           <Card className="mb-4">
-            <Card.Header>
+            <Card.Header className="d-flex justify-content-between align-items-center">
               <h4>Signatures</h4>
+              
+              {contractState.allEvents.length > 1 && (
+                <Dropdown>
+                  <Dropdown.Toggle variant="outline-secondary" id="version-dropdown" size="sm">
+                    Version {contractState.allEvents.length - selectedVersionIndex} of {contractState.allEvents.length}
+                  </Dropdown.Toggle>
+                  <Dropdown.Menu>
+                    {contractState.allEvents.map((event, idx) => {
+                      const eventContent = JSON.parse(event.content) as ContractEvent;
+                      const signatureCount = eventContent.signatures.length;
+                      const versionNumber = contractState.allEvents.length - idx;
+                      return (
+                        <Dropdown.Item 
+                          key={idx} 
+                          active={selectedVersionIndex === idx}
+                          onClick={() => setSelectedVersionIndex(idx)}
+                        >
+                          Version {versionNumber}: {signatureCount} {signatureCount === 1 ? 'signature' : 'signatures'} ({new Date(event.created_at * 1000).toLocaleDateString()})
+                        </Dropdown.Item>
+                      );
+                    })}
+                  </Dropdown.Menu>
+                </Dropdown>
+              )}
             </Card.Header>
             <Card.Body>
               <p>
@@ -285,9 +383,30 @@ const ContractDetail: React.FC = () => {
                     {signatures.map((sig, index) => (
                       <tr key={index}>
                         <td>
-                          <span title={sig.pubkey}>
-                            {sig.pubkey.substring(0, 8)}...
-                          </span>
+                          <OverlayTrigger
+                            placement="top"
+                            overlay={
+                              <Tooltip id={`tooltip-${sig.pubkey}`}>
+                                {sig.pubkey}
+                                <div className="mt-1">
+                                  <Button 
+                                    size="sm" 
+                                    variant="light" 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      navigator.clipboard.writeText(sig.pubkey);
+                                    }}
+                                  >
+                                    Copy to clipboard
+                                  </Button>
+                                </div>
+                              </Tooltip>
+                            }
+                          >
+                            <span>
+                              {getDisplayName(sig.pubkey)}
+                            </span>
+                          </OverlayTrigger>
                         </td>
                         <td>
                           {new Date(sig.timestamp * 1000).toLocaleString()}
@@ -344,7 +463,36 @@ const ContractDetail: React.FC = () => {
               </p>
               <p>
                 <strong>Status:</strong>{' '}
-                {isComplete ? 'Finalized' : 'Pending Signatures'}
+                {isComplete ? (
+                  <Badge bg="success">Finalized</Badge>
+                ) : (
+                  <Badge bg="warning">Pending Signatures</Badge>
+                )}
+              </p>
+              <p>
+                <strong>Originator:</strong>{' '}
+                <OverlayTrigger
+                  placement="top"
+                  overlay={
+                    <Tooltip id={`tooltip-originator`}>
+                      {originatorPubkey}
+                      <div className="mt-1">
+                        <Button 
+                          size="sm" 
+                          variant="light" 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigator.clipboard.writeText(originatorPubkey);
+                          }}
+                        >
+                          Copy to clipboard
+                        </Button>
+                      </div>
+                    </Tooltip>
+                  }
+                >
+                  <span>{getDisplayName(originatorPubkey)}</span>
+                </OverlayTrigger>
               </p>
             </Card.Body>
           </Card>

@@ -1,5 +1,5 @@
 import { SimplePool, Relay, Event, Filter, getEventHash, nip19 } from 'nostr-tools';
-import { NostrEvent } from '../types';
+import { NostrEvent, UserProfile } from '../types';
 import authManager from './AuthManager';
 
 /**
@@ -489,6 +489,216 @@ class NostrClient {
     
     // Close the pool
     this.pool.close(this.relays);
+  }
+
+  /**
+   * Fetch user profile information (NIP-05, username, display name, etc.)
+   * @param pubkey The public key of the user to fetch profile for
+   * @returns Promise resolving to a UserProfile object or null if not found
+   */
+  async fetchUserProfile(pubkey: string): Promise<UserProfile | null> {
+    console.log(`Fetching profile for user: ${pubkey}`);
+    
+    if (!pubkey) {
+      console.error('Invalid pubkey provided to fetchUserProfile');
+      return null;
+    }
+
+    // Filter to get user profile (kind 0)
+    const profileFilter: Filter = {
+      kinds: [0],
+      authors: [pubkey]
+    };
+    
+    console.log('Using profile filter:', JSON.stringify(profileFilter, null, 2));
+
+    try {
+      // Use subscribeMany method with timeout for more immediate results
+      console.log('Using subscription method with timeout');
+      const events = await new Promise<Event[]>((resolve) => {
+        const collectedEvents: Event[] = [];
+        const sub = this.pool.subscribeMany(
+          this.relays,
+          [profileFilter],
+          {
+            onevent: (event) => {
+              console.log('Received profile event:', event.id);
+              collectedEvents.push(event);
+            },
+            onclose: () => {
+              console.log(`Subscription closed, found ${collectedEvents.length} profile events`);
+              resolve(collectedEvents);
+            }
+          }
+        );
+        
+        // Close subscription after 5 seconds
+        setTimeout(() => {
+          console.log('Closing profile subscription after timeout');
+          sub.close();
+        }, 5000);
+      });
+      
+      if (!events || events.length === 0) {
+        console.log(`No profile found for pubkey: ${pubkey}`);
+        return {
+          pubkey: pubkey  // Return minimal profile with just the pubkey
+        };
+      }
+      
+      // Find the most recent profile event
+      const latestEvent = events.reduce((latest: Event, current: Event) => {
+        return !latest || current.created_at > latest.created_at ? current : latest;
+      }, events[0]);
+      
+      console.log(`Found profile event: ${latestEvent.id} from ${new Date(latestEvent.created_at * 1000).toISOString()}`);
+
+      // Parse the profile content
+      try {
+        const content = JSON.parse(latestEvent.content);
+        
+        // Extract relevant profile fields
+        const profile: UserProfile = {
+          pubkey: pubkey,
+          name: content.name,
+          displayName: content.display_name || content.displayName,
+          username: content.username || content.name,
+          nip05: content.nip05,
+          picture: content.picture || content.image || content.avatar,
+          about: content.about || content.description || content.bio,
+          created_at: latestEvent.created_at
+        };
+        
+        console.log('Extracted profile:', JSON.stringify(profile, null, 2));
+        return profile;
+      } catch (error) {
+        console.error('Error parsing profile content:', error);
+        return {
+          pubkey: pubkey  // Return minimal profile with just the pubkey
+        };
+      }
+    } catch (error) {
+      console.error('Error fetching user profile:', error);
+      return {
+        pubkey: pubkey  // Return minimal profile with just the pubkey
+      };
+    }
+  }
+  
+  /**
+   * Fetch profiles for multiple users in a single operation
+   * @param pubkeys Array of public keys to fetch profiles for
+   * @returns Promise resolving to a map of pubkey to UserProfile
+   */
+  async fetchUserProfiles(pubkeys: string[]): Promise<Map<string, UserProfile>> {
+    console.log(`Fetching profiles for ${pubkeys.length} users`);
+    
+    if (!pubkeys || pubkeys.length === 0) {
+      console.error('No pubkeys provided to fetchUserProfiles');
+      return new Map<string, UserProfile>();
+    }
+
+    // Filter to get user profiles (kind 0)
+    const profileFilter: Filter = {
+      kinds: [0],
+      authors: pubkeys
+    };
+    
+    console.log('Using batch profile filter:', JSON.stringify(profileFilter, null, 2));
+
+    try {
+      // Use subscribeMany method with timeout for more immediate results
+      console.log('Using subscription method with timeout');
+      const events = await new Promise<Event[]>((resolve) => {
+        const collectedEvents: Event[] = [];
+        const sub = this.pool.subscribeMany(
+          this.relays,
+          [profileFilter],
+          {
+            onevent: (event) => {
+              console.log('Received profile event:', event.id);
+              collectedEvents.push(event);
+            },
+            onclose: () => {
+              console.log(`Subscription closed, found ${collectedEvents.length} profile events`);
+              resolve(collectedEvents);
+            }
+          }
+        );
+        
+        // Close subscription after 5 seconds
+        setTimeout(() => {
+          console.log('Closing profile subscription after timeout');
+          sub.close();
+        }, 5000);
+      });
+      
+      // Create a map to store profiles by pubkey
+      const profileMap = new Map<string, UserProfile>();
+      
+      // First, initialize map with minimal profiles for all requested pubkeys
+      pubkeys.forEach(pubkey => {
+        profileMap.set(pubkey, { pubkey });
+      });
+      
+      if (!events || events.length === 0) {
+        console.log('No profiles found for requested pubkeys');
+        return profileMap;
+      }
+      
+      // Group events by author (pubkey)
+      const eventsByAuthor = new Map<string, Event[]>();
+      
+      for (const event of events) {
+        if (!eventsByAuthor.has(event.pubkey)) {
+          eventsByAuthor.set(event.pubkey, []);
+        }
+        eventsByAuthor.get(event.pubkey)!.push(event);
+      }
+      
+      // Process profiles for each author
+      for (const [pubkey, authorEvents] of eventsByAuthor.entries()) {
+        // Find the most recent profile event for this author
+        const latestEvent = authorEvents.reduce((latest, current) => {
+          return !latest || current.created_at > latest.created_at ? current : latest;
+        }, authorEvents[0]);
+        
+        try {
+          const content = JSON.parse(latestEvent.content);
+          
+          // Extract relevant profile fields
+          const profile: UserProfile = {
+            pubkey: pubkey,
+            name: content.name,
+            displayName: content.display_name || content.displayName,
+            username: content.username || content.name,
+            nip05: content.nip05,
+            picture: content.picture || content.image || content.avatar,
+            about: content.about || content.description || content.bio,
+            created_at: latestEvent.created_at
+          };
+          
+          // Update the profile map
+          profileMap.set(pubkey, profile);
+        } catch (error) {
+          console.error(`Error parsing profile content for ${pubkey}:`, error);
+          // Keep the minimal profile already in the map
+        }
+      }
+      
+      console.log(`Processed ${profileMap.size} profiles`);
+      return profileMap;
+    } catch (error) {
+      console.error('Error fetching user profiles:', error);
+      
+      // Return map with minimal profiles
+      const profileMap = new Map<string, UserProfile>();
+      pubkeys.forEach(pubkey => {
+        profileMap.set(pubkey, { pubkey });
+      });
+      
+      return profileMap;
+    }
   }
 }
 

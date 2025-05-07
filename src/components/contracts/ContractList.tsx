@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Row, Col, Card, Button, Badge, Form, Spinner } from 'react-bootstrap';
+import { Container, Row, Col, Card, Button, Badge, Form, Spinner, OverlayTrigger, Tooltip } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import authManager from '../../services/AuthManager';
 import contractManager from '../../services/ContractManager';
 import nostrClient from '../../services/NostrClient';
 import markdownUtils from '../../utils/MarkdownUtils';
-import { ContractEvent, NostrEvent } from '../../types';
+import { ContractEvent, NostrEvent, UserProfile } from '../../types';
 
 interface ContractListProps {
   onUploadClick: () => void;
@@ -18,6 +18,7 @@ const ContractList: React.FC<ContractListProps> = ({ onUploadClick }) => {
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
+  const [userProfiles, setUserProfiles] = useState<Map<string, UserProfile>>(new Map());
 
   useEffect(() => {
     // Load user preferences from localStorage
@@ -37,6 +38,53 @@ const ContractList: React.FC<ContractListProps> = ({ onUploadClick }) => {
     loadPreferences();
     fetchContracts();
   }, []);
+
+  // Effect to fetch user profiles when contracts change
+  useEffect(() => {
+    if (contracts.length > 0) {
+      fetchUserProfiles();
+    }
+  }, [contracts]);
+
+  // Fetch user profiles for all signers in all contracts
+  const fetchUserProfiles = async () => {
+    const pubkeysToFetch = new Set<string>();
+    
+    // Collect all pubkeys from contracts
+    for (const contract of contracts) {
+      // Add contract creator
+      pubkeysToFetch.add(contract.pubkey);
+      
+      // Add signatories from p tags
+      for (const tag of contract.tags) {
+        if (tag[0] === 'p' && tag[1]) {
+          pubkeysToFetch.add(tag[1]);
+        }
+      }
+      
+      // Add signers from signatures
+      try {
+        const content = JSON.parse(contract.content) as ContractEvent;
+        for (const signature of content.signatures) {
+          if (signature.pubkey) {
+            pubkeysToFetch.add(signature.pubkey);
+          }
+        }
+      } catch (error) {
+        console.warn('Error parsing contract content:', error);
+      }
+    }
+    
+    // Fetch profiles if we have pubkeys
+    if (pubkeysToFetch.size > 0) {
+      try {
+        const profiles = await nostrClient.fetchUserProfiles(Array.from(pubkeysToFetch));
+        setUserProfiles(profiles);
+      } catch (error) {
+        console.error('Error fetching user profiles:', error);
+      }
+    }
+  };
 
   // Save preferences when they change
   useEffect(() => {
@@ -282,6 +330,30 @@ const ContractList: React.FC<ContractListProps> = ({ onUploadClick }) => {
     return content.contract_id;
   };
 
+  // Helper function to get the display name for a pubkey
+  const getDisplayName = (pubkey: string): string => {
+    const profile = userProfiles.get(pubkey);
+    if (!profile) return pubkey.substring(0, 8) + '...';
+    
+    // Prefer NIP-05, then username, then displayName
+    if (profile.nip05) return profile.nip05;
+    if (profile.name) return profile.name;
+    if (profile.displayName) return profile.displayName;
+    
+    // Default to shortened pubkey
+    return pubkey.substring(0, 8) + '...';
+  };
+
+  // Get signers for a contract
+  const getContractSigners = (event: NostrEvent) => {
+    try {
+      const content = JSON.parse(event.content) as ContractEvent;
+      return content.signatures.map(sig => sig.pubkey);
+    } catch (error) {
+      return [];
+    }
+  };
+
   const filteredContracts = getFilteredContracts();
 
   return (
@@ -361,6 +433,47 @@ const ContractList: React.FC<ContractListProps> = ({ onUploadClick }) => {
                       {new Date(contract.created_at * 1000).toLocaleString()}
                     </p>
                     <p>{getContractPreview(contract)}</p>
+                    
+                    {/* Display signers */}
+                    {(() => {
+                      const signers = getContractSigners(contract);
+                      if (signers.length > 0) {
+                        return (
+                          <div className="mt-2">
+                            <small className="text-muted">
+                              Signed by: {signers.map((pubkey, index) => (
+                                <OverlayTrigger
+                                  key={pubkey}
+                                  placement="top"
+                                  overlay={
+                                    <Tooltip id={`tooltip-${pubkey}`}>
+                                      {pubkey}
+                                      <div className="mt-1">
+                                        <Button 
+                                          size="sm" 
+                                          variant="light" 
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            navigator.clipboard.writeText(pubkey);
+                                          }}
+                                        >
+                                          Copy to clipboard
+                                        </Button>
+                                      </div>
+                                    </Tooltip>
+                                  }
+                                >
+                                  <span className="badge bg-light text-dark me-1">
+                                    {getDisplayName(pubkey)}
+                                  </span>
+                                </OverlayTrigger>
+                              ))}
+                            </small>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
                   </Col>
                   <Col md={4} className="d-flex flex-column align-items-end justify-content-between">
                     <div>{getStatusBadge(status)}</div>
